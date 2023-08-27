@@ -1,0 +1,213 @@
+---
+title: "Investigation into Claims of Voter Fraud in the US 2020 Election"
+output:
+  html_document:
+    df_print: paged
+---
+On November 7th, 2020, Democratic nominee Joe Biden was declared the winner of America's 46th presidential election, displacing the incumbent Republican, Donald Trump, a controversial figure known for his populist policies and unconventional behaviour.
+
+Many have attributed Biden's success to mail-in votes made popular by the COVID-19 pandemic. Since the counting of these votes extended beyond the formal election deadline of November 3rd, Biden's win became controversial. Donald Trump, along with many of his supporters, accused the Democratic Party and Joe Biden of election fraud. 
+
+One Trump supporter, who has "some experience with data science", posted at https://thedonald.win/p/11Q8O2wesk/happening-calling-every-pede-to-/ "proof" that Trump votes had been given to Biden, referencing real time election data from the New York Times. 
+
+As someone who also happened to have "some experience with data science", I decided to investigate the poster's claims for myself.
+
+<hr>
+
+Using the below Python code, which was slightly modified from the source code<a href="https://pastebin.com/Q6nTP04N"> here </a>to retrieve the data directly from the Edison API, one can generate a .csv file containing the below data. For the purpose of validating the post's claims, I will be using the .csv file the post references, that can be accessed <a href="https://pastebin.com/FQuxxTvK">here</a>. Note that depending on when you access it, the API will return vote data up to the date of the call which will be slightly different from the .csv file I am using below. 
+```{python3}
+import requests
+
+state_list = ['alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut', 'delaware', 'district-of-columbia', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa', 'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan', 'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska', 'nevada', 'new-hampshire', 'new-jersey', 'new-mexico', 'new-york', 'north-carolina', 'north-dakota', 'ohio', 'oklahoma', 'oregon', 'pennsylvania', 'rhode-island', 'south-carolina', 'south-dakota', 'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west-virginia', 'wisconsin','wyoming']
+
+csv_content="state,timestamp,votes,eevp,trumpd,bidenj\r\n"
+
+for j in range(len(state_list)):
+    r = requests.get(f'https://static01.nyt.com/elections-assets/2020/data/api/2020-11-03/race-page/{state_list[j]}/president.json')
+    results = r.json()
+    xts = results['data']['races'][0]['timeseries']
+    for i in range(len(xts)):
+        csv_content=csv_content+f'{state_list[j]},{xts[i]["timestamp"]},{xts[i]["votes"]},{xts[i]["eevp"]},{xts[i]["vote_shares"]["trumpd"]},{xts[i]["vote_shares"]["bidenj"]}\r\n'    
+
+with open('result.csv', 'w', newline='') as f:
+    f.write(csv_content)
+```
+
+```{r}
+#Importing the necessary libraries
+library(dplyr)
+library(readr)
+library(tidyr)
+library(ggplot2)
+```
+```{r}
+#Reading in election data
+df <- read_csv("election_data.csv")
+head(df)
+```
+Using this info, I calculated the below info:
+<li>trump_votes: the number of votes that Trump has at a certain time</li>
+<li>biden_votes: the number of votes that Biden has at a certain time</li>
+<li>trump_vote_change: the difference in votes Trump had compared to when it was last recorded</li>
+<li>biden_vote_change: the difference in votes Biden had compared to when it was last recorded</li>
+```{r}
+df <- df %>% mutate(trump_votes = votes * trumpd, biden_votes = votes * bidenj)
+
+new_df <- data.frame()
+
+for (statename in unique(df$state)) {
+  state_df <- subset(df,df$state==statename)
+  trump_votechange <- c(0,state_df$trump_votes[-1] - state_df$trump_votes[-(dim(state_df)[1])])
+  biden_votechange <- c(0,state_df$biden_votes[-1] - state_df$biden_votes[-(dim(state_df)[1])])
+  state_df['trump_vote_changes'] <- trump_votechange
+  state_df['biden_vote_changes'] <- biden_votechange
+  new_df <- rbind(new_df,state_df)
+}
+
+head(new_df)
+```
+Judging from what the poster described of his methodology, whenever Trump's total vote count decreased and Biden's total vote count increased, the decrease was interpreted to be votes "taken from Trump and given to Biden". The Python code he used, which is posted <a href="https://workupload.com/file/DV4TvqtWEK8">here</a> reflects that logic. 
+
+Using the below R code, I was able to replicate the logic as well as confirm the numbers they gave. This "switch" occurred across 36 states, for a total of 512105 votes.
+
+The table below shows the following information:
+<li>trump_total_change: the total number of votes "taken" from Trump. (A negative number indicates that Trump lost votes.)
+<li>biden_total_change: the total number of votes Biden "took" from Trump. (A positive number indicates that Biden gained votes)
+```{r}
+trump_switched <- new_df %>% filter(biden_vote_changes>0, trump_vote_changes<0
+                  ) %>% group_by(state
+                  ) %>% summarise(trump_total_change = sum(trump_vote_changes), 
+                                  biden_total_change=sum(biden_vote_changes)
+                  ) %>% arrange((trump_total_change))
+trump_switched
+```
+```{r}
+print(paste0('Total number of Trump votes switched: ' ,sum(trump_switched$trump_total_change)*-1))
+```
+Using the same logic, we can also find votes "taken from Biden and given to Trump". This "switch" occurred across 46 states, for a total of 871663 votes.
+
+The table below shows the following information:
+<li>biden_total_change: the total number of votes "taken" from Biden. (A negative number indicates that Biden lost votes.)
+<li>trump_total_change: the total number of votes Trump "took" from Biden. (A positive number indicates that Trump gained votes)
+```{r}
+biden_switched <- new_df %>% filter(biden_vote_changes<0, trump_vote_changes>0
+                  ) %>% group_by(state
+                  ) %>% summarise(biden_total_change=sum(biden_vote_changes), trump_total_change = sum(trump_vote_changes)
+                  ) %>% arrange((biden_total_change))
+biden_switched
+```
+```{r}
+print(paste0('Total number of Biden votes switched: ' ,sum(biden_switched$biden_total_change)*-1))
+```
+Next, I combined the results from the above two tables into one. The table below shows the following information:
+<li>total_biden_switched: the total number of votes Biden gained or lost as a result of this "vote switching". (A negative number indicates that Biden has a net loss of votes, and a positive number a net gain of votes.)
+<li>total_trump_switched: the total number of votes Trump gained or lost as a result of this "vote switching". (A negative number indicates that Trump has a net loss of votes, and a positive number a net gain of votes.)
+```{r}
+state_vote_diff <- merge(biden_switched, trump_switched, by='state', suffixes = c('_one','_two'), all = TRUE) %>%
+  mutate_all(~replace_na(.,0)) %>%
+  mutate(total_biden_switched = biden_total_change_one + biden_total_change_two, 
+         total_trump_switched = trump_total_change_one + trump_total_change_two) %>%
+  select(state,total_biden_switched,total_trump_switched)
+
+state_vote_diff
+```
+I then combined this information with the initial voting data to see if this "vote switching" had any impact on the results of the election.
+
+The table below shows the following information:
+<li>timestamp: when the vote counting data was last updated for each state.
+<li>biden_votes: the total number of votes Biden received in each state as of the time indicated in the timestamp column.
+<li>trump_votes: the total number of votes Trump received in each state as of the time indicated in the timestamp column.
+<li>total_biden_switched and total_trump_switched: please see above table's explanation.
+<li>orig_result: the candicate that received more votes in each state without taking into account the "vote switching".
+<li>modified_trump_votes: the total number of votes Trump would have received after taking into account both votes he took from Biden and Biden took from him.
+<li>modified_biden_votes: the total number of votes Biden would have received after taking into account both votes he took from Trump and Trump took from him.
+<li>modified_result: the candicate that would have received more votes in each state after taking into account the "vote switching".
+
+```{r}
+#Defining Results Function
+return_results <- function(trump,biden) {
+  if (trump > biden) {
+    return('Trump')
+  } else if (biden > trump) {
+    return('Biden')
+  } else {
+    return('Tie')
+  }
+}
+#Obtaining Initial Results
+state_vote_summary <- new_df %>% 
+  select(timestamp,state,trump_votes,biden_votes) %>%
+  group_by(state) %>% 
+  top_n(1,wt=timestamp) %>%
+  merge(state_vote_diff, by='state', all=TRUE) %>%
+  mutate_at(c('total_trump_switched','total_biden_switched'),~replace_na(.,0)) %>%
+  mutate(orig_result = trump_votes > biden_votes,
+         modified_trump_votes = trump_votes - total_trump_switched,
+         modified_biden_votes = biden_votes - total_biden_switched,
+         modified_result = modified_trump_votes > modified_biden_votes)
+
+state_vote_summary
+```
+Let's take a look to see if any state's result would have been changed by the "vote-switching"
+```{r}
+subset(state_vote_summary, orig_result != modified_result)
+```
+So there are two suspicious values, Pennsylvania and Georgia. Let's investigate them further:
+```{r}
+#Creating the DataFrames for Visualization
+#Pennsylvania
+penn = df %>% filter(state == 'pennsylvania')
+penn = rbind(penn[c('timestamp','trumpd','trump_votes')] %>% mutate(candidate='Trump') %>% rename(percent=trumpd,num_votes=trump_votes),
+             penn[c('timestamp','bidenj','biden_votes')] %>% mutate(candidate='Biden') %>% rename(percent=bidenj,num_votes=biden_votes))
+#Georgia
+ga = df %>% filter(state == 'georgia')
+ga = rbind(ga[c('timestamp','trumpd','trump_votes')] %>% mutate(candidate='Trump') %>% rename(percent=trumpd,num_votes=trump_votes),
+           ga[c('timestamp','bidenj','biden_votes')] %>% mutate(candidate='Biden') %>% rename(percent=bidenj,num_votes=biden_votes))
+```
+
+```{r}
+#Pennsylvania
+ggplot(penn, aes(x=timestamp,y=num_votes,color=candidate)) + 
+  geom_point() +
+  scale_color_manual(values = c("Biden" = "blue", "Trump" = "red")) + 
+  labs(title="Number of Votes over Time (Penn)",y="Number of Votes",x="Time") 
+ggplot(penn, aes(x=timestamp,y=percent,color=candidate)) + 
+  geom_point() +
+  scale_color_manual(values = c("Biden" = "blue", "Trump" = "red")) + 
+  labs(title="Proportion of Votes over Time (Penn)",y="% of Votes",x="Time")
+```
+```{r}
+#Pennsylvania
+ggplot(ga, aes(x=timestamp,y=num_votes,color=candidate)) + 
+  geom_point() +
+  scale_color_manual(values = c("Biden" = "blue", "Trump" = "red")) + 
+  labs(title="Number of Votes over Time (GA)",y="Number of Votes",x="Time")
+
+ggplot(ga, aes(x=timestamp,y=percent,color=candidate)) + 
+  geom_point() +
+  scale_color_manual(values = c("Biden" = "blue", "Trump" = "red")) + 
+  labs(title="Proportion of Votes over Time (GA)",y="% of Votes",x="Time")
+```
+
+As can be seen in the proportions line chart for both states, there is a common trend of:
+<ol start="1">
+<li>Biden starting off with a higher percentage of the votes. However, his percentage rapidly drops and Trump's rapidly rises.
+<li>By the beginning of November 4th, Trump has a higher percentage of the vote.
+<li>Then, slowly, the percentage of votes for Biden rises until he edges over Trump.
+</ol>
+I wonder if this pattern applies to the whole country.
+```{r}
+others = df %>% filter(!(state %in% c('pennsylvania','georgia')))
+others = rbind(others[c('timestamp','trumpd','trump_votes')] %>% mutate(candidate='Trump') 
+             %>% rename(percent=trumpd,num_votes=trump_votes),
+             others[c('timestamp','bidenj','biden_votes')] %>% mutate(candidate='Biden')
+             %>% rename(percent=bidenj,num_votes=biden_votes))
+others = others %>% mutate(time_min = cut(others$timestamp, breaks='1 min')) %>% 
+  group_by(candidate, time_min) %>% 
+  summarise(total_votes=mean(num_votes)) 
+
+ggplot(others, aes(x=time_min,y=total_votes,color=candidate)) + 
+  geom_point() +
+  scale_color_manual(values = c("Biden" = "blue", "Trump" = "red")) + 
+  labs(title="Number of Votes over Time (Others)",y="Number of Votes",x="Time")
+```
