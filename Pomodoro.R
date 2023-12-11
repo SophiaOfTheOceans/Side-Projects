@@ -26,8 +26,9 @@ start_timer <- function(minutes) {
 }
 
 #Function to run the Pomodoro
-pomodoro <- function(goal,type='Work',pom=25,short=5,long=15,long_break=4) {
-  
+pomodoro <- function(goal,type='Work',pom=25,short=5,long=15,long_break=4,
+                     filepath=r'(.\Pomodoro Records.csv)') {
+  records <- read.csv(filepath)
   #Initialize values
   continue <- 'y'
   poms <- 0
@@ -36,38 +37,50 @@ pomodoro <- function(goal,type='Work',pom=25,short=5,long=15,long_break=4) {
   while (continue == 'y') {
     #Aesthetics
     print(goal)
+    poms <- poms + 1
     print(paste0('Pomodoro #',poms,':'))
     
     #Initialize values
-    poms <- poms + 1
     work_begin <- Sys.time()
     start_timer(pom)
     
     #Break
     has_break <- readline(prompt = "Start break now? (y/n): ")
+    work_end <- Sys.time()
+    work_time <- as.numeric(difftime(work_end, work_begin, units='mins'))
     if (has_break == 'y') {
       #Calculate values
-      work_end <- Sys.time()
-      work_time <- work_end - work_begin
       break_begin <- Sys.time()
       
       #Start break
       if (poms %% long_break == 0) {
         start_timer(long)
+        break.length <- long
       } else {
         start_timer(short)
+        break.length <- short
       }
       #End break
-      end_break <- readline(prompt = "End break now? (y/n): ")
+      end_break <- readline(prompt = "Type 'y' to end break: ")
       if (end_break == 'y') {
         break_end <- Sys.time()
-        break_time <- break_end - break_begin
+        break_time <- as.numeric(difftime(break_end, break_begin, units='mins'))
       }
+    } else {
+      break.length <- 0
+      break_time <- 0
+    }
+    done <-  readline(prompt = "Did you get work done? (y/n): ")
+    if (done == 'y') {
+      print("That's great!")
+    } else {
+      print("Aw, that shucks. :(")
     }
     #Add record
-    record <- data.frame(Date = Sys.Date(), Time = work_begin, Type = type,
-                         Goal = goal, 
-                         Work_Time=work_time, Break_Time=break_time)
+    record <- data.frame(Pom = poms, Date = format(Sys.Date(), format="%Y-%m-%d"), 
+                         Time = format(work_begin, format="%Y-%m-%d %H:%M:%S"), Type = type,
+                         Goal = goal, Pom_Length=pom, Work_Time=work_time, Break_Length=break.length, 
+                         Break_Time=break_time, Work_Done=done)
     records <- rbind(records,record)
     
     #Continue?
@@ -77,15 +90,8 @@ pomodoro <- function(goal,type='Work',pom=25,short=5,long=15,long_break=4) {
       goal <- readline(prompt = "Input goal: ")
     }
   }
-  done <-  readline(prompt = "Did you get work done? (y/n): ")
-  if (done == 'y') {
-    print("That's great!")
-  } else {
-    print("Aw, that shucks. :(")
-  }
+  write.csv(records,filepath,row.names = FALSE)
 }
-#Initialize Records
-records <- read.csv(r'.\Pomodoro Records.csv)')
 
 # Start a 25-minute pomodoro
-pomodoro()
+pomodoro('Test',type='Test',pom = 0.05, short = 0.05)
